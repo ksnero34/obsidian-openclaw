@@ -185,15 +185,28 @@ Sync notes between your Obsidian vault and the OpenClaw gateway. This enables tw
 
 ### Prerequisites
 
-The sync feature requires running the sync server on your gateway:
+The sync feature requires the `obsidian-sync` skill running on your gateway.
 
+**Install via ClawdHub:**
 ```bash
-# Start the sync server (uses same token as gateway)
-SYNC_TOKEN="your-gateway-token" \
-node /data/clawdbot/skills/obsidian-sync/scripts/sync-server.mjs
+clawdhub install obsidian-sync
 ```
 
-Or run as a systemd service for persistence — see the skill documentation.
+**Or manually:** Copy the `skill/` folder from this repo to your Clawdbot skills directory.
+
+**Start the sync server:**
+```bash
+SYNC_TOKEN="your-gateway-token" \
+node skills/obsidian-sync/scripts/sync-server.mjs
+```
+
+**Expose via Tailscale (for remote access):**
+```bash
+tailscale serve --bg --https=18790 http://localhost:18790
+```
+
+**Run as a service (persist across reboots):**
+See `skill/SKILL.md` for systemd setup instructions.
 
 ### Setup
 
