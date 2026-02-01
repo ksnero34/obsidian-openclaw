@@ -11,44 +11,44 @@ Chat with Pip (OpenClaw) directly from Obsidian. Create, edit, and manage notes 
 
 ## Installation
 
-### Prerequisites
+This plugin is installed using [BRAT](https://github.com/TfTHacker/obsidian42-brat) (Beta Reviewers Auto-update Tool).
 
-- [OpenClaw](https://github.com/openclaw/openclaw) running with HTTP endpoint enabled
-- Node.js 18+
+### Step 1: Install BRAT
 
-### Build
+1. Open Obsidian Settings → Community plugins
+2. Click "Browse" and search for "BRAT"
+3. Install and enable the BRAT plugin
 
-```bash
-cd obsidian-pipbot
-npm install
-npm run build
-```
+### Step 2: Add OpenClaw via BRAT
 
-### Install in Obsidian
+1. Open Obsidian Settings → BRAT
+2. Click "Add Beta plugin"
+3. Enter the repository URL: `AndyBold/obsidian-openclaw`
+4. Click "Add Plugin"
+5. Enable "OpenClaw" in Settings → Community plugins
 
-1. Copy these files to your vault's `.obsidian/plugins/obsidian-openclaw/`:
-   - `main.js`
-   - `manifest.json`
-   - `styles.css`
+### Step 3: Configure
 
-2. Enable the plugin in Obsidian settings → Community plugins
+1. Open Obsidian Settings → OpenClaw
+2. Set your **Gateway URL** (e.g., `https://your-machine.tailnet.ts.net` or `http://127.0.0.1:18789`)
+   - Do not include a trailing slash
+3. Set your **Gateway Token** (from your Clawdbot config)
+4. Click "Test Connection" to verify
 
-3. Configure settings:
-   - **Gateway URL**: `http://127.0.0.1:18789` (default)
-   - **Gateway Token**: Your Clawdbot gateway token
+## Opening the Chat Sidebar
 
-### Development
+There are several ways to open the Pip chat panel:
 
-```bash
-npm run dev
-```
+1. **Ribbon icon** - Click the chat bubble icon (💬) in the left ribbon
+2. **Command palette** - Press `Cmd/Ctrl+P` and search for "Open Pip Chat"
+3. **Hotkey** - Assign a custom hotkey in Settings → Hotkeys, search for "Pip"
 
-This watches for changes and rebuilds automatically.
+The chat panel opens in the right sidebar. You can drag it to a different position if preferred.
 
 ## Usage
 
-1. Click the chat bubble icon in the ribbon (left sidebar) or use the command palette: "Open Pip Chat"
-2. Type your message and press Cmd/Ctrl+Enter or click Send
+1. Open the Pip chat sidebar (see above)
+2. Type your message and press `Cmd/Ctrl+Enter` or click **Send**
 3. Toggle "Include current note" to give Pip context about what you're working on
 
 ### Example prompts
@@ -62,18 +62,20 @@ This watches for changes and rebuilds automatically.
 
 When you ask Pip to work with files, it returns structured actions that the plugin executes:
 
-- `createFile` - Create a new file with content
-- `updateFile` - Replace file contents
-- `appendToFile` - Add content to end of file
-- `deleteFile` - Delete a file
-- `renameFile` - Rename/move a file
-- `openFile` - Open a file in the editor
+| Action | Description |
+|--------|-------------|
+| `createFile` | Create a new file with content |
+| `updateFile` | Replace file contents |
+| `appendToFile` | Add content to end of file |
+| `deleteFile` | Delete a file |
+| `renameFile` | Rename/move a file |
+| `openFile` | Open a file in the editor |
 
 ## Configuration
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Gateway URL | Clawdbot gateway address | `http://127.0.0.1:18789` |
+| Gateway URL | Clawdbot gateway address (no trailing slash) | `http://127.0.0.1:18789` |
 | Gateway Token | Auth token for the gateway | (empty) |
 | Show actions in chat | Display action indicators | false |
 
@@ -91,6 +93,16 @@ Make sure your OpenClaw config has the HTTP endpoint enabled:
     }
   }
 }
+```
+
+## Development
+
+```bash
+git clone https://github.com/AndyBold/obsidian-openclaw.git
+cd obsidian-openclaw
+npm install
+npm run dev   # Watch mode
+npm run build # Production build
 ```
 
 ## License
