@@ -25,6 +25,17 @@ export class SyncService {
   private isSyncing = false;
   private lastSyncState: Map<string, string> = new Map(); // path -> hash
 
+  const ALLOWED_EXTENSIONS = new Set([
+    "md",
+    "writing",
+    "drawing",
+    "canvas",
+    "json",
+    "txt",
+    "yml",
+    "yaml",
+  ]);
+
   constructor(
     private app: App,
     private getSettings: () => OpenClawSettings
@@ -130,7 +141,7 @@ export class SyncService {
 
     const processFolder = async (f: TFolder, basePath: string) => {
       for (const child of f.children) {
-        if (child instanceof TFile && child.extension === "md") {
+        if (child instanceof TFile && ALLOWED_EXTENSIONS.has(child.extension)) {
           const relativePath = child.path.slice(localPath.length + 1);
           const content = await vault.read(child);
           const hash = this.getContentHash(content);
