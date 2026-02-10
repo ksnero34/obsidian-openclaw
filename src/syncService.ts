@@ -1,7 +1,6 @@
-import { App, TFile, TFolder, Notice, requestUrl } from "obsidian";
-import { OpenClawSettings, SyncPathConfig, SyncFileState, SyncConflict } from "./types";
+import { App, Notice, requestUrl, TFile, TFolder } from "obsidian";
 import { secureTokenStorage } from "./secureStorage";
-import { createHash } from "crypto";
+import { OpenClawSettings, SyncConflict, SyncPathConfig } from "./types";
 
 interface RemoteFile {
   path: string;
@@ -20,21 +19,22 @@ interface ReadResponse extends RemoteFile {
   content: string;
 }
 
+const ALLOWED_EXTENSIONS = new Set([
+  "md",
+  "writing",
+  "drawing",
+  "canvas",
+  "json",
+  "txt",
+  "yml",
+  "yaml",
+]);
+
 export class SyncService {
   private syncInterval: ReturnType<typeof setInterval> | null = null;
   private isSyncing = false;
   private lastSyncState: Map<string, string> = new Map(); // path -> hash
 
-  const ALLOWED_EXTENSIONS = new Set([
-    "md",
-    "writing",
-    "drawing",
-    "canvas",
-    "json",
-    "txt",
-    "yml",
-    "yaml",
-  ]);
 
   constructor(
     private app: App,
