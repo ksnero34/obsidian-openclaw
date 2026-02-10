@@ -1,4 +1,4 @@
-import { App, Notice, requestUrl, TFile, TFolder } from "obsidian";
+import { App, normalizePath, Notice, requestUrl, TFile, TFolder } from "obsidian";
 import { secureTokenStorage } from "./secureStorage";
 import { OpenClawSettings, SyncConflict, SyncPathConfig } from "./types";
 
@@ -9,7 +9,6 @@ interface RemoteFile {
   modified: string;
   hash: string;
 }
-
 interface ListResponse {
   path: string;
   files: RemoteFile[];
@@ -30,16 +29,36 @@ const ALLOWED_EXTENSIONS = new Set([
   "yaml",
 ]);
 
+function normalizeRoot(input?: string): string {
+  const v = (input ?? "").trim();
+  if (!v || v === "/" || v === ".") return "";
+  return normalizePath(v).replace(/^\/+|\/+$/g, "");
+}
+
+function toRelative(root: string, fullPath: string): string {
+  const r = normalizeRoot(root);
+  const f = normalizePath(fullPath).replace(/^\/+/, "");
+  if (!r) return f;
+  if (f === r) return "";
+  if (f.startsWith(r + "/")) return f.slice(r.length + 1);
+  return f;
+}
+
+function joinPath(root: string, rel: string): string {
+  const r = normalizeRoot(root);
+  const p = normalizePath(rel).replace(/^\/+/, "");
+  return r ? normalizePath(`${r}/${p}`) : p;
+}
+
 export class SyncService {
   private syncInterval: ReturnType<typeof setInterval> | null = null;
   private isSyncing = false;
   private lastSyncState: Map<string, string> = new Map(); // path -> hash
 
-
   constructor(
     private app: App,
     private getSettings: () => OpenClawSettings
-  ) {}
+  ) { }
 
   private getToken(): string {
     const settings = this.getSettings();
@@ -48,7 +67,6 @@ export class SyncService {
       settings.gatewayTokenPlaintext
     );
   }
-
   private async request<T>(
     method: string,
     endpoint: string,
@@ -56,7 +74,7 @@ export class SyncService {
   ): Promise<T> {
     const settings = this.getSettings();
     const url = `${settings.syncServerUrl}${endpoint}`;
-    
+
     const response = await requestUrl({
       url,
       method,
@@ -75,9 +93,7 @@ export class SyncService {
     return response.json;
   }
 
-  /**
-   * List remote files
-   */
+  /** List remote files */
   async listRemote(remotePath: string): Promise<RemoteFile[]> {
     const response = await this.request<ListResponse>(
       "GET",
@@ -86,9 +102,7 @@ export class SyncService {
     return response.files;
   }
 
-  /**
-   * Read a remote file
-   */
+  /** Read a remote file */
   async readRemote(remotePath: string): Promise<ReadResponse> {
     return await this.request<ReadResponse>(
       "GET",
@@ -96,9 +110,7 @@ export class SyncService {
     );
   }
 
-  /**
-   * Write a remote file
-   */
+  /** Write a remote file */
   async writeRemote(
     remotePath: string,
     content: string,
@@ -111,54 +123,51 @@ export class SyncService {
     );
   }
 
-  /**
-   * Get local file hash
-   */
+  /** Get local file hash */
   private getContentHash(content: string): string {
     // Simple hash for browser environment
     let hash = 0;
     for (let i = 0; i < content.length; i++) {
       const char = content.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
+      hash = (hash << 5) - hash + char;
       hash = hash & hash;
     }
     // Convert to hex-like string and pad to look like MD5
-    const hex = Math.abs(hash).toString(16).padStart(8, '0');
+    const hex = Math.abs(hash).toString(16).padStart(8, "0");
     return hex.repeat(4); // 32 chars like MD5
   }
 
-  /**
-   * List local files in a vault path
-   */
+  /** List local files in a vault path */
   async listLocal(localPath: string): Promise<Map<string, { file: TFile; hash: string }>> {
     const files = new Map<string, { file: TFile; hash: string }>();
     const { vault } = this.app;
+    const localRoot = normalizeRoot(localPath);
+    const folder = localRoot
+      ? vault.getAbstractFileByPath(localRoot)
+      : vault.getRoot();
 
-    const folder = vault.getAbstractFileByPath(localPath);
     if (!folder || !(folder instanceof TFolder)) {
       return files;
     }
 
-    const processFolder = async (f: TFolder, basePath: string) => {
+    const processFolder = async (f: TFolder) => {
       for (const child of f.children) {
         if (child instanceof TFile && ALLOWED_EXTENSIONS.has(child.extension)) {
-          const relativePath = child.path.slice(localPath.length + 1);
+          const relativePath = toRelative(localRoot, child.path);
           const content = await vault.read(child);
           const hash = this.getContentHash(content);
           files.set(relativePath, { file: child, hash });
         } else if (child instanceof TFolder) {
-          await processFolder(child, basePath);
+          await processFolder(child);
         }
       }
     };
 
-    await processFolder(folder, localPath);
+    await processFolder(folder);
     return files;
   }
 
-  /**
-   * Sync a single path configuration
-   */
+  /** Sync a single path configuration */
   async syncPath(
     config: SyncPathConfig,
     onConflict: (conflict: SyncConflict) => Promise<"local" | "remote" | "skip">
@@ -166,30 +175,33 @@ export class SyncService {
     const { vault } = this.app;
     const stats = { pulled: 0, pushed: 0, conflicts: 0, errors: 0 };
 
-    try {
-      // Ensure local folder exists
-      const localFolder = vault.getAbstractFileByPath(config.localPath);
-      if (!localFolder) {
-        await vault.createFolder(config.localPath);
-      }
+    const localRoot = normalizeRoot(config.localPath);
+    const remoteRoot = normalizeRoot(config.remotePath);
 
+    try {
+      // Ensure local folder exists (skip create when local root is vault root)
+      if (localRoot) {
+        const localFolder = vault.getAbstractFileByPath(localRoot);
+        if (!localFolder) {
+          await vault.createFolder(localRoot);
+        }
+      }
       // Get remote and local file lists
-      const remoteFiles = await this.listRemote(config.remotePath);
-      const localFiles = await this.listLocal(config.localPath);
+      const remoteFiles = await this.listRemote(remoteRoot);
+      const localFiles = await this.listLocal(localRoot);
 
       // Build maps for comparison
       const remoteMap = new Map<string, RemoteFile>();
       for (const rf of remoteFiles) {
-        // Remote path is like "notes/file.md", we want just "file.md"
-        const relativePath = rf.path.slice(config.remotePath.length + 1);
+        const relativePath = toRelative(remoteRoot, rf.path);
         remoteMap.set(relativePath, rf);
       }
 
       // Process remote files (pull new/updated)
       for (const [relativePath, remoteFile] of remoteMap) {
         const localInfo = localFiles.get(relativePath);
-        const localPath = `${config.localPath}/${relativePath}`;
-        const fullRemotePath = `${config.remotePath}/${relativePath}`;
+        const localPath = joinPath(localRoot, relativePath);
+        const fullRemotePath = joinPath(remoteRoot, relativePath);
 
         try {
           if (!localInfo) {
@@ -202,12 +214,15 @@ export class SyncService {
           } else if (localInfo.hash !== remoteFile.hash) {
             // File differs - check for conflict
             const lastKnownHash = this.lastSyncState.get(localPath);
-            
-            if (lastKnownHash && lastKnownHash !== localInfo.hash && lastKnownHash !== remoteFile.hash) {
+            if (
+              lastKnownHash &&
+              lastKnownHash !== localInfo.hash &&
+              lastKnownHash !== remoteFile.hash
+            ) {
               // Both changed since last sync - conflict!
               const remoteContent = await this.readRemote(fullRemotePath);
               const localContent = await vault.read(localInfo.file);
-              
+
               const resolution = await onConflict({
                 localPath,
                 remotePath: fullRemotePath,
@@ -266,9 +281,9 @@ export class SyncService {
       // Process local-only files (push new)
       for (const [relativePath, localInfo] of localFiles) {
         if (!remoteMap.has(relativePath)) {
-          const localPath = `${config.localPath}/${relativePath}`;
-          const fullRemotePath = `${config.remotePath}/${relativePath}`;
-          
+          const localPath = joinPath(localRoot, relativePath);
+          const fullRemotePath = joinPath(remoteRoot, relativePath);
+
           try {
             const content = await vault.read(localInfo.file);
             await this.writeRemote(fullRemotePath, content);
@@ -280,7 +295,6 @@ export class SyncService {
           }
         }
       }
-
     } catch (err) {
       console.error(`Sync path error for ${config.remotePath}:`, err);
       stats.errors++;
@@ -293,7 +307,7 @@ export class SyncService {
     const { vault } = this.app;
     const parts = filePath.split("/");
     parts.pop(); // Remove filename
-    
+
     let currentPath = "";
     for (const part of parts) {
       currentPath = currentPath ? `${currentPath}/${part}` : part;
@@ -304,9 +318,7 @@ export class SyncService {
     }
   }
 
-  /**
-   * Run a full sync
-   */
+  /** Run a full sync */
   async sync(
     onConflict: (conflict: SyncConflict) => Promise<"local" | "remote" | "skip">
   ): Promise<{ pulled: number; pushed: number; conflicts: number; errors: number }> {
@@ -319,10 +331,9 @@ export class SyncService {
 
     try {
       const settings = this.getSettings();
-      
+
       for (const pathConfig of settings.syncPaths) {
         if (!pathConfig.enabled) continue;
-        
         const stats = await this.syncPath(pathConfig, onConflict);
         totals.pulled += stats.pulled;
         totals.pushed += stats.pushed;
@@ -343,18 +354,16 @@ export class SyncService {
     return totals;
   }
 
-  /**
-   * Start automatic sync
-   */
+  /** Start automatic sync */
   startAutoSync(): void {
     this.stopAutoSync();
-    
+
     const settings = this.getSettings();
     if (!settings.syncEnabled || settings.syncInterval <= 0) return;
 
     const intervalMs = settings.syncInterval * 60 * 1000;
     this.syncInterval = setInterval(() => {
-      this.sync(async (conflict) => {
+      this.sync(async () => {
         // Auto-sync uses configured behavior
         const behavior = this.getSettings().syncConflictBehavior;
         if (behavior === "preferLocal") return "local";
@@ -366,9 +375,7 @@ export class SyncService {
     console.log(`OpenClaw: Auto-sync started (every ${settings.syncInterval} min)`);
   }
 
-  /**
-   * Stop automatic sync
-   */
+  /** Stop automatic sync */
   stopAutoSync(): void {
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
@@ -377,9 +384,7 @@ export class SyncService {
     }
   }
 
-  /**
-   * Test connection to sync server
-   */
+  /** Test connection to sync server */
   async testConnection(): Promise<{ ok: boolean; error?: string }> {
     try {
       const settings = this.getSettings();
@@ -394,9 +399,13 @@ export class SyncService {
       if (response.status === 200) {
         return { ok: true };
       }
+
       return { ok: false, error: `HTTP ${response.status}` };
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 }
